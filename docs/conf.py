@@ -89,6 +89,33 @@ autodoc_type_aliases: dict[str, str] = {
 # -- Sphinx-Click configuration
 # https://sphinx-click.readthedocs.io/
 extensions.append("sphinx_click")
+
+# -- Redirects for pages that were moved or removed
+# https://github.com/sphinx-contrib/sphinx-reredirects
+extensions.append("sphinx_reredirects")
+redirects = {
+    # Removed pages
+    "install": "gettingstarted/installation.html",
+    "intro": "index.html",
+    "gettingstarted": "gettingstarted/quickstart.html",
+    # Renamed/moved pages
+    "dev": "developing/openedx.html",
+    "quickstart": "gettingstarted/quickstart.html",
+    "whatnext": "gettingstarted/whatsnext.html",
+    "download/binary": "../gettingstarted/download/binary.html",
+    "download/pip": "../gettingstarted/download/pip.html",
+    "tutorials/nightly": "../developing/nightly.html",
+    "tutorials/plugin": "../developing/plugins/creating.html",
+    "tutorials/theming": "../developing/themes.html",
+    "tutorials/index": "../developing/index.html",
+    "plugins/intro": "../plugins/index.html",
+    "plugins/examples": "../developing/plugins/examples.html",
+    "plugins/v0/api": "../../developing/legacy/api.html",
+    "plugins/v0/gettingstarted": "../../developing/legacy/gettingstarted.html",
+    "plugins/v0/index": "../../developing/legacy/index.html",
+    "plugins/v0/legacy": "../../developing/legacy/legacy.html",
+    "reference/indexes": "../developing/plugins/indexes.html",
+}
 # This is to avoid the addition of the local username to the docs
 os.environ["HOME"] = "~"
 # Make sure that sphinx-click can find the tutor module
