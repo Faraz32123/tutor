@@ -10,15 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: make docs
         run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-sphinx
-          pip install sphinx-click
-          pip install sphinx-rtd-theme
-          pip install tutor
-          cd docs
-          make build
+          pip install -r requirements/docs.txt
+          make docs
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/_build/html
