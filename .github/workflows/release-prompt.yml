@@ -1,0 +1,42 @@
+name: Release Prompt
+
+# Fires when a PR is merged into the release branch.
+# Posts a comment tagging the maintainer and asking for patch or minor.
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - 'release'
+
+jobs:
+  prompt-release:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Post release prompt comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const maintainers = [
+              'Faraz32123',
+            ];
+            const merger = context.payload.pull_request.merged_by?.login ?? context.payload.pull_request.user.login;
+            const mentions = maintainers.map(u => `@${u}`).join(' ');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: [
+                `${mentions} — PR merged by @${merger}. 🚀`,
+                '',
+                'Do you want to cut a new release? Reply with one of:',
+                '- `patch` — bumps patch version (e.g. 21.1.1 → 21.1.2)',
+                '- `minor` — bumps minor version (e.g. 21.1.1 → 21.2.0)',
+                '',
+                '_No action will be taken unless one of the above is commented._',
+              ].join('\n'),
+            });

@@ -1,0 +1,174 @@
+name: Release Version Bump
+
+# Fires when someone comments on a PR.
+# If the commenter is a maintainer and the comment is exactly "patch" or "minor",
+# bumps the version, runs make changelog, and opens a release-prep PR.
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  version-bump:
+    # Only run on PR comments (not plain issue comments)
+    if: github.event.issue.pull_request != null
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Check commenter and comment body
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const maintainers = [
+              'Faraz32123',
+            ];
+            const commenter = context.payload.comment.user.login;
+            const body = context.payload.comment.body.trim().toLowerCase();
+
+            if (!maintainers.includes(commenter)) {
+              core.info(`Commenter ${commenter} is not a maintainer — skipping.`);
+              core.setOutput('proceed', 'false');
+              return;
+            }
+            if (body !== 'patch' && body !== 'minor') {
+              core.info(`Comment "${body}" is not "patch" or "minor" — skipping.`);
+              core.setOutput('proceed', 'false');
+              return;
+            }
+
+            // Verify the PR is actually merged
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.issue.number,
+            });
+            if (!pr.data.merged) {
+              core.info('PR is not merged — skipping.');
+              core.setOutput('proceed', 'false');
+              return;
+            }
+
+            // Verify the PR base is the release branch
+            const baseBranch = pr.data.base.ref;
+            if (baseBranch !== 'release') {
+              core.info(`Base branch "${baseBranch}" is not the release branch — skipping.`);
+              core.setOutput('proceed', 'false');
+              return;
+            }
+
+            core.setOutput('proceed', 'true');
+            core.setOutput('bump_type', body);
+            core.setOutput('base_branch', baseBranch);
+            core.setOutput('commenter', commenter);
+
+      - name: Checkout release branch
+        if: steps.check.outputs.proceed == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.check.outputs.base_branch }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        if: steps.check.outputs.proceed == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Install scriv
+        if: steps.check.outputs.proceed == 'true'
+        run: pip install scriv
+
+      - name: Bump version
+        if: steps.check.outputs.proceed == 'true'
+        id: bump
+        env:
+          BUMP_TYPE: ${{ steps.check.outputs.bump_type }}
+        run: |
+          # Find __about__.py (works for tutor and plugins alike)
+          ABOUT_FILE=$(find . -name "__about__.py" -not -path "./.git/*" | head -1)
+          echo "Found version file: $ABOUT_FILE"
+
+          CURRENT=$(grep -oP '(?<=__version__ = ")[^"]+' "$ABOUT_FILE")
+          echo "Current version: $CURRENT"
+
+          MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+          MINOR=$(echo "$CURRENT" | cut -d. -f2)
+          PATCH=$(echo "$CURRENT" | cut -d. -f3)
+
+          if [ "$BUMP_TYPE" = "patch" ]; then
+            NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+          else
+            NEW_VERSION="$MAJOR.$((MINOR + 1)).0"
+          fi
+
+          echo "New version: $NEW_VERSION"
+          sed -i "s/__version__ = \"$CURRENT\"/__version__ = \"$NEW_VERSION\"/" "$ABOUT_FILE"
+
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "about_file=$ABOUT_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Run make changelog
+        if: steps.check.outputs.proceed == 'true'
+        run: make changelog
+
+      - name: Create branch and commit
+        if: steps.check.outputs.proceed == 'true'
+        id: branch
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.new_version }}
+          BASE_BRANCH: ${{ steps.check.outputs.base_branch }}
+          ABOUT_FILE: ${{ steps.bump.outputs.about_file }}
+        run: |
+          BRANCH="release-prep/v${NEW_VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add "$ABOUT_FILE" CHANGELOG.md changelog.d/
+          git commit -m "Release v${NEW_VERSION}"
+          git push origin "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Open release PR
+        if: steps.check.outputs.proceed == 'true'
+        uses: actions/github-script@v7
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.new_version }}
+          BASE_BRANCH: ${{ steps.check.outputs.base_branch }}
+          HEAD_BRANCH: ${{ steps.branch.outputs.branch }}
+          COMMENTER: ${{ steps.check.outputs.commenter }}
+          BUMP_TYPE: ${{ steps.check.outputs.bump_type }}
+        with:
+          script: |
+            const { NEW_VERSION, BASE_BRANCH, HEAD_BRANCH, COMMENTER, BUMP_TYPE } = process.env;
+            const pr = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Release v${NEW_VERSION}`,
+              head: HEAD_BRANCH,
+              base: BASE_BRANCH,
+              body: [
+                `## Release v${NEW_VERSION} (${BUMP_TYPE} bump)`,
+                '',
+                `Triggered by @${COMMENTER}.`,
+                '',
+                'This PR:',
+                `- Bumps \`__version__\` to \`${NEW_VERSION}\``,
+                '- Collects changelog entries via `make changelog`',
+                '',
+                `@${COMMENTER} please review and merge when ready.`,
+              ].join('\n'),
+            });
+
+            // Request review from the maintainer
+            await github.rest.pulls.requestReviewers({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.data.number,
+              reviewers: [COMMENTER],
+            });
+
+            core.info(`Created PR #${pr.data.number}: ${pr.data.html_url}`);
